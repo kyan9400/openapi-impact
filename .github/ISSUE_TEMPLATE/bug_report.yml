@@ -1,0 +1,27 @@
+name: Bug report
+description: Report an incorrect compatibility result or CLI problem.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: specs
+    attributes:
+      label: Minimal specification pair
+      description: Provide the smallest sanitized OpenAPI documents that reproduce the result.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Explain the compatibility classification you expected.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenAPI Impact version
+      placeholder: 1.0.0
+    validations:
+      required: true

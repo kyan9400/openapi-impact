@@ -1,0 +1,58 @@
+name: OpenAPI Impact
+description: Detect breaking changes between two OpenAPI specifications.
+author: Hassan Ak
+
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  base:
+    description: Path to the previous OpenAPI specification.
+    required: true
+  head:
+    description: Path to the new OpenAPI specification.
+    required: true
+  format:
+    description: Report format—text, markdown, or json.
+    required: false
+    default: markdown
+  fail-on:
+    description: Use breaking to block incompatible changes, or never to report only.
+    required: false
+    default: breaking
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+
+    - name: Install OpenAPI Impact
+      shell: bash
+      run: python -m pip install --disable-pip-version-check "$GITHUB_ACTION_PATH"
+
+    - name: Compare specifications
+      shell: bash
+      env:
+        IMPACT_BASE: ${{ inputs.base }}
+        IMPACT_HEAD: ${{ inputs.head }}
+        IMPACT_FORMAT: ${{ inputs.format }}
+        IMPACT_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        report="$RUNNER_TEMP/openapi-impact-report"
+        set +e
+        openapi-impact "$IMPACT_BASE" "$IMPACT_HEAD" \
+          --format "$IMPACT_FORMAT" \
+          --fail-on "$IMPACT_FAIL_ON" \
+          --github-annotations \
+          --output "$report"
+        status=$?
+        set -e
+        if [ "$IMPACT_FORMAT" = "markdown" ]; then
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        cat "$report"
+        exit "$status"
