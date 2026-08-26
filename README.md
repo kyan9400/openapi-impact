@@ -37,10 +37,11 @@ The command exits with status `1` when it finds a breaking change and `2` when a
 | --- | --- |
 | Paths and operations | Removed endpoints, added endpoints, changed `operationId` |
 | Requests | New required parameters, removed parameters, required request bodies |
-| Responses | Removed status codes and changed response schemas |
-| Security | Authentication added to an existing operation |
+| Responses | Removed status codes, media types, headers, and changed response schemas |
+| Security | Authentication added or schemes and required scopes changed |
 | Schemas | Type or format changes, removed properties, new required properties |
-| Constraints | Narrowed enums, higher minimums, lower maximums, tighter lengths |
+| Constraints | Narrowed enums, nullable removal, closed objects, patterns, and unique arrays |
+| Serialization | Changed parameter `style` or `explode` behavior |
 
 Additive changes are reported separately rather than hidden. Popularity, naming style, and documentation wording do not affect compatibility results.
 
@@ -55,6 +56,9 @@ openapi-impact old.yaml new.yaml --format markdown --output impact.md
 
 # Machine-readable automation
 openapi-impact old.json new.json --format json --output impact.json
+
+# GitHub code-scanning compatible output
+openapi-impact old.yaml new.yaml --format sarif --output impact.sarif
 
 # Report without blocking the pipeline
 openapi-impact old.yaml new.yaml --fail-on never
@@ -80,7 +84,7 @@ jobs:
           head: contracts/openapi.yaml
 ```
 
-The action adds a Markdown report to the workflow summary, creates annotations for individual changes, and fails on breaking changes by default.
+The action adds a Markdown report to the workflow summary, creates annotations for individual changes, and fails on breaking changes by default. Its `report` output exposes the generated file to later artifact or SARIF upload steps.
 
 ## Python API
 

@@ -7,6 +7,7 @@ from openapi_impact.report import (
     render_github_annotations,
     render_json,
     render_markdown,
+    render_sarif,
     render_text,
 )
 
@@ -48,3 +49,19 @@ def test_github_annotations_escape_workflow_commands() -> None:
     annotation = render_github_annotations(result.changes)
 
     assert annotation == "::error title=unsafe%25title::paths./users: line one%0Aline two"
+
+
+def test_sarif_report_contains_rules_and_logical_locations() -> None:
+    report = json.loads(render_sarif(sample_result()))
+
+    assert report["version"] == "2.1.0"
+    run = report["runs"][0]
+    assert {rule["id"] for rule in run["tool"]["driver"]["rules"]} == {
+        "path.added",
+        "path.removed",
+    }
+    assert run["results"][0]["level"] == "error"
+    assert (
+        run["results"][0]["locations"][0]["logicalLocations"][0]["fullyQualifiedName"]
+        == "paths./users"
+    )

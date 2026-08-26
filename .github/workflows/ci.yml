@@ -52,9 +52,15 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Run local action
+        id: impact
         uses: ./
         with:
           base: examples/orders-v1.yaml
           head: examples/orders-v2.yaml
           format: markdown
           fail-on: never
+
+      - name: Verify report output
+        env:
+          REPORT_PATH: ${{ steps.impact.outputs.report }}
+        run: test -s "$REPORT_PATH"

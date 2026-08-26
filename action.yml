@@ -14,13 +14,18 @@ inputs:
     description: Path to the new OpenAPI specification.
     required: true
   format:
-    description: Report format—text, markdown, or json.
+    description: Report format—text, markdown, json, or sarif.
     required: false
     default: markdown
   fail-on:
     description: Use breaking to block incompatible changes, or never to report only.
     required: false
     default: breaking
+
+outputs:
+  report:
+    description: Absolute path to the generated report file.
+    value: ${{ steps.compare.outputs.report }}
 
 runs:
   using: composite
@@ -35,6 +40,7 @@ runs:
       run: python -m pip install --disable-pip-version-check "$GITHUB_ACTION_PATH"
 
     - name: Compare specifications
+      id: compare
       shell: bash
       env:
         IMPACT_BASE: ${{ inputs.base }}
@@ -43,6 +49,7 @@ runs:
         IMPACT_FAIL_ON: ${{ inputs.fail-on }}
       run: |
         report="$RUNNER_TEMP/openapi-impact-report"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
         set +e
         openapi-impact "$IMPACT_BASE" "$IMPACT_HEAD" \
           --format "$IMPACT_FORMAT" \

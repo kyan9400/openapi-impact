@@ -23,10 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("head", help="New OpenAPI JSON or YAML document")
     parser.add_argument(
         "--format",
-        choices=("text", "markdown", "json"),
+        choices=("text", "markdown", "json", "sarif"),
         default="text",
         dest="format_name",
-        help="Report format (default: text)",
+        help="Report format: text, markdown, json, or sarif (default: text)",
     )
     parser.add_argument("--output", type=Path, help="Write the report to a file")
     parser.add_argument(

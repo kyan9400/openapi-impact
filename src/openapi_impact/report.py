@@ -1,4 +1,4 @@
-"""Stable text, Markdown, and JSON report formats."""
+"""Stable text, Markdown, JSON, and SARIF report formats."""
 
 from __future__ import annotations
 
@@ -69,8 +69,71 @@ def render_json(result: ComparisonResult) -> str:
     return json.dumps(result.to_dict(), indent=2, sort_keys=False)
 
 
+def render_sarif(result: ComparisonResult) -> str:
+    """Render a SARIF 2.1.0 log for code-scanning and artifact integrations."""
+
+    rules = []
+    for code in sorted({change.code for change in result.changes}):
+        example = next(change for change in result.changes if change.code == code)
+        level = "error" if example.severity is Severity.BREAKING else "note"
+        rules.append(
+            {
+                "id": code,
+                "shortDescription": {"text": example.message},
+                "defaultConfiguration": {"level": level},
+                "properties": {"tags": ["openapi", "compatibility", example.severity.value]},
+            }
+        )
+
+    sarif_results = []
+    for change in result.changes:
+        properties = {"severity": change.severity.value, "location": change.location}
+        if change.before is not None:
+            properties["before"] = change.before
+        if change.after is not None:
+            properties["after"] = change.after
+        sarif_results.append(
+            {
+                "ruleId": change.code,
+                "level": "error" if change.severity is Severity.BREAKING else "note",
+                "message": {"text": change.message},
+                "locations": [
+                    {
+                        "logicalLocations": [
+                            {"fullyQualifiedName": change.location, "kind": "member"}
+                        ]
+                    }
+                ],
+                "properties": properties,
+            }
+        )
+
+    payload = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "OpenAPI Impact",
+                        "informationUri": "https://github.com/kyan9400/openapi-impact",
+                        "rules": rules,
+                    }
+                },
+                "results": sarif_results,
+            }
+        ],
+    }
+    return json.dumps(payload, indent=2, sort_keys=False)
+
+
 def render(result: ComparisonResult, format_name: str) -> str:
-    renderers = {"text": render_text, "markdown": render_markdown, "json": render_json}
+    renderers = {
+        "text": render_text,
+        "markdown": render_markdown,
+        "json": render_json,
+        "sarif": render_sarif,
+    }
     return renderers[format_name](result)
 
 

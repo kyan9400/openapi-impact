@@ -19,12 +19,46 @@ def _sequence(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _schema_from_content(document: dict[str, Any], container: Any) -> dict[str, Any]:
-    content = _mapping(_mapping(resolve_local_ref(document, container)).get("content"))
-    preferred = content.get("application/json")
-    media_type = preferred if preferred is not None else next(iter(content.values()), {})
-    schema = _mapping(media_type).get("schema", {})
-    return _mapping(schema)
+def _content(document: dict[str, Any], container: Any) -> dict[str, Any]:
+    resolved = _mapping(resolve_local_ref(document, container))
+    return _mapping(resolved.get("content"))
+
+
+def _compare_content(
+    result: ComparisonResult,
+    old_document: dict[str, Any],
+    new_document: dict[str, Any],
+    old_container: Any,
+    new_container: Any,
+    location: str,
+) -> None:
+    old_content = _content(old_document, old_container)
+    new_content = _content(new_document, new_container)
+    for media_type in sorted(old_content.keys() - new_content.keys()):
+        result.add(
+            "content.media_type_removed",
+            Severity.BREAKING,
+            f"{location}.content.{media_type}",
+            f"Media type {media_type!r} is no longer supported.",
+        )
+    for media_type in sorted(new_content.keys() - old_content.keys()):
+        result.add(
+            "content.media_type_added",
+            Severity.NON_BREAKING,
+            f"{location}.content.{media_type}",
+            f"Media type {media_type!r} is now supported.",
+        )
+    for media_type in sorted(old_content.keys() & new_content.keys()):
+        old_schema = _mapping(old_content[media_type]).get("schema", {})
+        new_schema = _mapping(new_content[media_type]).get("schema", {})
+        _compare_schema(
+            result,
+            old_document,
+            new_document,
+            old_schema,
+            new_schema,
+            f"{location}.content.{media_type}.schema",
+        )
 
 
 def _parameters(
@@ -87,6 +121,49 @@ def _compare_schema(
             f"Schema format changed from {old_format!r} to {new_format!r}.",
             old_format,
             new_format,
+        )
+
+    if old.get("nullable") is True and new.get("nullable") is not True:
+        result.add(
+            "schema.nullable_removed",
+            Severity.BREAKING,
+            location,
+            "The schema no longer accepts null.",
+            True,
+            bool(new.get("nullable")),
+        )
+
+    if (
+        old.get("additionalProperties", True) is not False
+        and new.get("additionalProperties") is False
+    ):
+        result.add(
+            "schema.additional_properties_forbidden",
+            Severity.BREAKING,
+            location,
+            "Additional object properties are no longer accepted.",
+        )
+
+    old_pattern = old.get("pattern")
+    new_pattern = new.get("pattern")
+    if isinstance(new_pattern, str) and new_pattern != old_pattern:
+        result.add(
+            "schema.pattern_changed",
+            Severity.BREAKING,
+            location,
+            "The accepted string pattern was added or changed.",
+            old_pattern,
+            new_pattern,
+        )
+
+    if old.get("uniqueItems") is not True and new.get("uniqueItems") is True:
+        result.add(
+            "schema.unique_items_required",
+            Severity.BREAKING,
+            location,
+            "Array items must now be unique.",
+            bool(old.get("uniqueItems")),
+            True,
         )
 
     old_enum = set(_sequence(old.get("enum")))
@@ -252,6 +329,21 @@ def _compare_parameters(
                 False,
             )
 
+        default_style = "form" if parameter_location in {"query", "cookie"} else "simple"
+        old_style = old_parameter.get("style", default_style)
+        new_style = new_parameter.get("style", default_style)
+        old_explode = old_parameter.get("explode", old_style == "form")
+        new_explode = new_parameter.get("explode", new_style == "form")
+        if old_style != new_style or old_explode != new_explode:
+            result.add(
+                "parameter.serialization_changed",
+                Severity.BREAKING,
+                parameter_path,
+                "Parameter serialization style or explode behavior changed.",
+                {"style": old_style, "explode": old_explode},
+                {"style": new_style, "explode": new_explode},
+            )
+
         _compare_schema(
             result,
             old_document,
@@ -264,6 +356,67 @@ def _compare_parameters(
 
 def _response_codes(operation: Any) -> set[str]:
     return {str(code) for code in _mapping(_mapping(operation).get("responses"))}
+
+
+def _security_requirements(document: dict[str, Any], operation: Any) -> list[dict[str, Any]]:
+    operation_mapping = _mapping(operation)
+    raw = (
+        operation_mapping.get("security")
+        if "security" in operation_mapping
+        else document.get("security")
+    )
+    return [value for value in _sequence(raw) if isinstance(value, dict)]
+
+
+def _canonical_security(
+    requirements: list[dict[str, Any]],
+) -> list[tuple[tuple[str, tuple[str, ...]], ...]]:
+    return sorted(
+        tuple(
+            sorted(
+                (scheme, tuple(sorted(str(scope) for scope in _sequence(scopes))))
+                for scheme, scopes in requirement.items()
+            )
+        )
+        for requirement in requirements
+    )
+
+
+def _compare_response_headers(
+    result: ComparisonResult,
+    old_document: dict[str, Any],
+    new_document: dict[str, Any],
+    old_response: Any,
+    new_response: Any,
+    location: str,
+) -> None:
+    old_headers = _mapping(_mapping(resolve_local_ref(old_document, old_response)).get("headers"))
+    new_headers = _mapping(_mapping(resolve_local_ref(new_document, new_response)).get("headers"))
+    for name in sorted(old_headers.keys() - new_headers.keys(), key=str.lower):
+        result.add(
+            "response.header_removed",
+            Severity.BREAKING,
+            f"{location}.headers.{name}",
+            f"Response header {name!r} was removed.",
+        )
+    for name in sorted(new_headers.keys() - old_headers.keys(), key=str.lower):
+        result.add(
+            "response.header_added",
+            Severity.NON_BREAKING,
+            f"{location}.headers.{name}",
+            f"Response header {name!r} was added.",
+        )
+    for name in sorted(old_headers.keys() & new_headers.keys(), key=str.lower):
+        old_header = _mapping(resolve_local_ref(old_document, old_headers[name]))
+        new_header = _mapping(resolve_local_ref(new_document, new_headers[name]))
+        _compare_schema(
+            result,
+            old_document,
+            new_document,
+            old_header.get("schema", {}),
+            new_header.get("schema", {}),
+            f"{location}.headers.{name}.schema",
+        )
 
 
 def _compare_operation(
@@ -291,14 +444,32 @@ def _compare_operation(
             new_operation_id,
         )
 
-    if not _sequence(_mapping(old_operation).get("security")) and _sequence(
-        _mapping(new_operation).get("security")
-    ):
+    old_security = _security_requirements(old_document, old_operation)
+    new_security = _security_requirements(new_document, new_operation)
+    canonical_old_security = _canonical_security(old_security)
+    canonical_new_security = _canonical_security(new_security)
+    if not old_security and new_security:
         result.add(
             "operation.security_added",
             Severity.BREAKING,
             f"{location}.security",
             "The operation now requires authentication.",
+        )
+    elif old_security and not new_security:
+        result.add(
+            "operation.security_removed",
+            Severity.NON_BREAKING,
+            f"{location}.security",
+            "The operation no longer requires authentication.",
+        )
+    elif canonical_old_security != canonical_new_security:
+        result.add(
+            "operation.security_changed",
+            Severity.BREAKING,
+            f"{location}.security",
+            "Authentication schemes or required scopes changed.",
+            canonical_old_security,
+            canonical_new_security,
         )
 
     _compare_parameters(
@@ -340,13 +511,13 @@ def _compare_operation(
                 f"{location}.requestBody",
                 "The request body is now required.",
             )
-        _compare_schema(
+        _compare_content(
             result,
             old_document,
             new_document,
-            _schema_from_content(old_document, old_request),
-            _schema_from_content(new_document, new_request),
-            f"{location}.requestBody.schema",
+            old_request,
+            new_request,
+            f"{location}.requestBody",
         )
 
     old_responses = _mapping(_mapping(old_operation).get("responses"))
@@ -366,13 +537,22 @@ def _compare_operation(
             f"Response {code!r} was added.",
         )
     for code in sorted(_response_codes(old_operation) & _response_codes(new_operation)):
-        _compare_schema(
+        response_location = f"{location}.responses.{code}"
+        _compare_content(
             result,
             old_document,
             new_document,
-            _schema_from_content(old_document, old_responses[code]),
-            _schema_from_content(new_document, new_responses[code]),
-            f"{location}.responses.{code}.schema",
+            old_responses[code],
+            new_responses[code],
+            response_location,
+        )
+        _compare_response_headers(
+            result,
+            old_document,
+            new_document,
+            old_responses[code],
+            new_responses[code],
+            response_location,
         )
 
 

@@ -117,6 +117,62 @@ def test_removed_response_is_breaking(
     assert codes(result) == {"response.removed"}
 
 
+def test_removed_media_type_and_response_header_are_breaking(
+    base_spec: dict[str, Any], clone_spec: dict[str, Any]
+) -> None:
+    old_response = base_spec["paths"]["/orders/{order_id}"]["get"]["responses"]["200"]
+    new_response = clone_spec["paths"]["/orders/{order_id}"]["get"]["responses"]["200"]
+    old_response["content"]["application/xml"] = {"schema": {"type": "string"}}
+    old_response["headers"] = {"X-Request-Id": {"schema": {"type": "string"}}}
+    new_response["headers"] = {}
+
+    result = compare_specs(base_spec, clone_spec)
+
+    assert {"content.media_type_removed", "response.header_removed"} <= codes(result)
+    assert len(result.breaking_changes) == 2
+
+
+def test_parameter_serialization_and_security_scope_changes_are_breaking(
+    base_spec: dict[str, Any], clone_spec: dict[str, Any]
+) -> None:
+    base_operation = base_spec["paths"]["/orders/{order_id}"]["get"]
+    new_operation = clone_spec["paths"]["/orders/{order_id}"]["get"]
+    base_operation["security"] = [{"oauth": ["orders:read"]}]
+    new_operation["security"] = [{"oauth": ["orders:read", "orders:admin"]}]
+    new_operation["parameters"][1]["style"] = "spaceDelimited"
+
+    result = compare_specs(base_spec, clone_spec)
+
+    assert {"operation.security_changed", "parameter.serialization_changed"} <= codes(result)
+
+
+def test_schema_restrictions_are_breaking(
+    base_spec: dict[str, Any], clone_spec: dict[str, Any]
+) -> None:
+    old_order = base_spec["components"]["schemas"]["Order"]
+    new_order = clone_spec["components"]["schemas"]["Order"]
+    old_order["additionalProperties"] = True
+    new_order["additionalProperties"] = False
+    old_order["properties"]["note"]["nullable"] = True
+    new_order["properties"]["note"]["nullable"] = False
+    new_order["properties"]["note"]["pattern"] = "^[A-Z]"
+    old_order["properties"]["tags"] = {"type": "array", "items": {"type": "string"}}
+    new_order["properties"]["tags"] = {
+        "type": "array",
+        "items": {"type": "string"},
+        "uniqueItems": True,
+    }
+
+    result = compare_specs(base_spec, clone_spec)
+
+    assert {
+        "schema.additional_properties_forbidden",
+        "schema.nullable_removed",
+        "schema.pattern_changed",
+        "schema.unique_items_required",
+    } <= codes(result)
+
+
 def test_changes_sort_breaking_items_first(
     base_spec: dict[str, Any], clone_spec: dict[str, Any]
 ) -> None:
